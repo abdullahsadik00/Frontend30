@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/day_content.dart';
 import '../models/progress_state.dart';
+import '../utils/phase_colors.dart';
 import '../widgets/progress_scope.dart';
 import 'verification_screen.dart';
 
@@ -18,12 +19,11 @@ class DayDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs    = Theme.of(context).colorScheme;
-    final pn    = day.phaseNumber;
-    final color = _phaseColor(pn);
+    final color    = phaseColor(day.phaseNumber);
+    final progress = ProgressScope.of(context);
 
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: color,
@@ -37,16 +37,13 @@ class DayDetailScreen extends StatelessWidget {
                 Text(
                   'Day ${day.dayNumber}: ${day.shortTopic}',
                   style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
+                      fontWeight: FontWeight.w700, fontSize: 16),
                 ),
                 Text(
                   day.phaseShort,
                   style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.8),
-                  ),
+                      fontSize: 11,
+                      color: Colors.white.withValues(alpha: 0.8)),
                 ),
               ],
             ),
@@ -57,7 +54,9 @@ class DayDetailScreen extends StatelessWidget {
             indicatorColor: Colors.white,
             indicatorWeight: 3,
             tabs: [
-              const Tab(icon: Icon(Icons.article_outlined, size: 18), text: 'Content'),
+              const Tab(
+                  icon: Icon(Icons.article_outlined, size: 18),
+                  text: 'Content'),
               Tab(
                 icon: Stack(
                   clipBehavior: Clip.none,
@@ -80,6 +79,29 @@ class DayDetailScreen extends StatelessWidget {
                 ),
                 text: 'Practice',
               ),
+              Tab(
+                icon: progress.noteFor(day.dayNumber) != null
+                    ? Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          const Icon(Icons.edit_note_rounded, size: 18),
+                          Positioned(
+                            top: -3,
+                            right: -5,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : const Icon(Icons.edit_note_rounded, size: 18),
+                text: 'Notes',
+              ),
             ],
           ),
         ),
@@ -87,59 +109,58 @@ class DayDetailScreen extends StatelessWidget {
           children: [
             _ContentTab(day: day, accentColor: color),
             _PracticeTab(day: day),
+            _NotesTab(
+              dayNumber: day.dayNumber,
+              initialNote: progress.noteFor(day.dayNumber),
+            ),
           ],
         ),
-        floatingActionButton: _buildFAB(context, cs),
+        floatingActionButton: _buildFAB(context, color),
       ),
     );
   }
 
-  Widget? _buildFAB(BuildContext context, ColorScheme cs) {
+  Widget? _buildFAB(BuildContext context, Color color) {
     if (status == DayStatus.locked) return null;
+
     if (status == DayStatus.completed) {
       return FloatingActionButton.extended(
-        onPressed: null,
-        backgroundColor: Colors.green.shade600,
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                VerificationScreen(day: day, isPracticeMode: true),
+          ),
+        ),
+        backgroundColor: color,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.check_circle_outline),
-        label: const Text('Day Complete'),
+        icon: const Icon(Icons.replay_rounded),
+        label: const Text('Practice Again'),
       );
     }
-    // unlocked
+
     return FloatingActionButton.extended(
       onPressed: () => Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => VerificationScreen(day: day)),
+        MaterialPageRoute(
+          builder: (_) => VerificationScreen(day: day),
+        ),
       ).then((_) {
-        // Re-check status after returning
         final progress = ProgressScope.of(context);
         if (progress.statusFor(day.dayNumber) == DayStatus.completed) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Day ${day.dayNumber} complete! Day ${day.dayNumber + 1} unlocked.'),
-              backgroundColor: Colors.green.shade600,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Day ${day.dayNumber} complete! Day ${day.dayNumber + 1} unlocked.'),
+            backgroundColor: Colors.green.shade600,
+            behavior: SnackBarBehavior.floating,
+          ));
         }
       }),
-      backgroundColor: _phaseColor(day.phaseNumber),
+      backgroundColor: color,
       foregroundColor: Colors.white,
       icon: const Icon(Icons.quiz_outlined),
       label: const Text('Take Test'),
     );
-  }
-
-  Color _phaseColor(int phase) {
-    const colors = {
-      1: Color(0xFFF59E0B),
-      2: Color(0xFF3B82F6),
-      3: Color(0xFF10B981),
-      4: Color(0xFF8B5CF6),
-      5: Color(0xFFEF4444),
-      6: Color(0xFFEC4899),
-    };
-    return colors[phase] ?? const Color(0xFF6366F1);
   }
 }
 
@@ -152,7 +173,7 @@ class _ContentTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final cs      = Theme.of(context).colorScheme;
     final content = day.markdownContent.isNotEmpty
         ? day.markdownContent
         : '_No content available for this day yet._';
@@ -187,15 +208,11 @@ class _ContentTab extends StatelessWidget {
           border: Border.all(color: cs.outlineVariant),
         ),
         blockquoteDecoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: accentColor, width: 4),
-          ),
+          border: Border(left: BorderSide(color: accentColor, width: 4)),
           color: accentColor.withValues(alpha: 0.06),
         ),
         horizontalRuleDecoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: cs.outlineVariant),
-          ),
+          border: Border(top: BorderSide(color: cs.outlineVariant)),
         ),
       ),
     );
@@ -219,7 +236,8 @@ class _PracticeTab extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.info_outline, size: 48,
+              Icon(Icons.info_outline,
+                  size: 48,
                   color: Theme.of(context).colorScheme.outline),
               const SizedBox(height: 16),
               Text(
@@ -238,7 +256,10 @@ class _PracticeTab extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         if (pq.easy.isNotEmpty) ...[
-          _DiffHeader(label: 'Easy', count: pq.easy.length, color: const Color(0xFF10B981)),
+          _DiffHeader(
+              label: 'Easy',
+              count: pq.easy.length,
+              color: const Color(0xFF10B981)),
           const SizedBox(height: 8),
           ...pq.easy.asMap().entries.map((e) => _QuestionCard(
                 index: e.key + 1,
@@ -248,7 +269,10 @@ class _PracticeTab extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         if (pq.medium.isNotEmpty) ...[
-          _DiffHeader(label: 'Medium', count: pq.medium.length, color: const Color(0xFFF59E0B)),
+          _DiffHeader(
+              label: 'Medium',
+              count: pq.medium.length,
+              color: const Color(0xFFF59E0B)),
           const SizedBox(height: 8),
           ...pq.medium.asMap().entries.map((e) => _QuestionCard(
                 index: e.key + 1,
@@ -258,7 +282,10 @@ class _PracticeTab extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         if (pq.hard.isNotEmpty) ...[
-          _DiffHeader(label: 'Hard', count: pq.hard.length, color: const Color(0xFFEF4444)),
+          _DiffHeader(
+              label: 'Hard',
+              count: pq.hard.length,
+              color: const Color(0xFFEF4444)),
           const SizedBox(height: 8),
           ...pq.hard.asMap().entries.map((e) => _QuestionCard(
                 index: e.key + 1,
@@ -275,14 +302,16 @@ class _DiffHeader extends StatelessWidget {
   final String label;
   final int count;
   final Color color;
-  const _DiffHeader({required this.label, required this.count, required this.color});
+  const _DiffHeader(
+      {required this.label, required this.count, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
@@ -290,14 +319,17 @@ class _DiffHeader extends StatelessWidget {
           ),
           child: Text(
             label,
-            style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 13),
+            style: TextStyle(
+                color: color, fontWeight: FontWeight.w700, fontSize: 13),
           ),
         ),
         const SizedBox(width: 8),
         Text(
           '$count question${count == 1 ? '' : 's'}',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).colorScheme.outline),
+          style: Theme.of(context)
+              .textTheme
+              .labelSmall
+              ?.copyWith(color: Theme.of(context).colorScheme.outline),
         ),
       ],
     );
@@ -308,7 +340,8 @@ class _QuestionCard extends StatefulWidget {
   final int index;
   final PracticeQuestion question;
   final Color color;
-  const _QuestionCard({required this.index, required this.question, required this.color});
+  const _QuestionCard(
+      {required this.index, required this.question, required this.color});
 
   @override
   State<_QuestionCard> createState() => _QuestionCardState();
@@ -384,14 +417,11 @@ class _QuestionCardState extends State<_QuestionCard> {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: cs.outlineVariant),
                       ),
-                      child: Text(
-                        q.code!,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 12,
-                          height: 1.4,
-                        ),
-                      ),
+                      child: Text(q.code!,
+                          style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              height: 1.4)),
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -444,20 +474,99 @@ class _SolutionRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
-              ),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: color)),
               const SizedBox(height: 2),
-              Text(value, style: const TextStyle(fontSize: 13, height: 1.4)),
+              Text(value,
+                  style: const TextStyle(fontSize: 13, height: 1.4)),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Notes tab ─────────────────────────────────────────────────────────────────
+
+class _NotesTab extends StatefulWidget {
+  final int dayNumber;
+  final String? initialNote;
+  const _NotesTab({required this.dayNumber, this.initialNote});
+
+  @override
+  State<_NotesTab> createState() => _NotesTabState();
+}
+
+class _NotesTabState extends State<_NotesTab> {
+  late final TextEditingController _ctrl;
+  bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialNote ?? '');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    await ProgressScope.of(context).saveNote(widget.dayNumber, _ctrl.text);
+    if (mounted) {
+      setState(() => _dirty = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Note saved'),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _ctrl,
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              onChanged: (_) => setState(() => _dirty = true),
+              decoration: InputDecoration(
+                hintText: 'Notes for Day ${widget.dayNumber}…\n\n'
+                    'Key concepts, code snippets, things to remember.',
+                hintMaxLines: 4,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: cs.surfaceContainerLow,
+                alignLabelWithHint: true,
+                contentPadding: const EdgeInsets.all(14),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _dirty ? _save : null,
+            icon: const Icon(Icons.save_rounded),
+            label: Text(_dirty ? 'Save Note' : 'Saved'),
+          ),
+        ],
+      ),
     );
   }
 }

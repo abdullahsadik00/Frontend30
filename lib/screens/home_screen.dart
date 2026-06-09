@@ -3,29 +3,17 @@ import '../models/day_content.dart';
 import '../models/progress_state.dart';
 import '../models/struggle_record.dart';
 import '../services/curriculum_service.dart';
+import '../utils/phase_colors.dart';
+import '../widgets/day_search_delegate.dart';
 import '../widgets/progress_scope.dart';
 import 'day_detail_screen.dart';
-
-// ── Phase palette ─────────────────────────────────────────────────────────────
-
-const _phaseColors = {
-  1: Color(0xFFF59E0B),
-  2: Color(0xFF3B82F6),
-  3: Color(0xFF10B981),
-  4: Color(0xFF8B5CF6),
-  5: Color(0xFFEF4444),
-  6: Color(0xFFEC4899),
-};
-const _phaseNames = {
-  1: 'JavaScript', 2: 'TypeScript', 3: 'React',
-  4: 'Next.js',    5: 'Sys Design', 6: 'Interview',
-};
-Color phaseColor(int n) => _phaseColors[n] ?? const Color(0xFF6366F1);
+import 'stats_screen.dart';
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -78,9 +66,27 @@ class _Body extends StatelessWidget {
           expandedHeight: 0,
           backgroundColor: cs.primary,
           foregroundColor: cs.onPrimary,
-          title: const Text('Frontend 30',
-              style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+          title: const Text(
+            'Frontend 30',
+            style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5),
+          ),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.search_rounded),
+              tooltip: 'Search',
+              onPressed: () => showSearch(
+                context: context,
+                delegate: DaySearchDelegate(days),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.bar_chart_rounded),
+              tooltip: 'Stats',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const StatsScreen()),
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.restart_alt_rounded),
               tooltip: 'Reset progress',
@@ -101,7 +107,7 @@ class _Body extends StatelessWidget {
             ),
           ),
 
-        // ── Review section (struggled questions) ─────────────────────────────
+        // ── Review section ────────────────────────────────────────────────────
         if (progress.struggles.isNotEmpty)
           SliverToBoxAdapter(
             child: _ReviewSection(struggles: progress.struggles),
@@ -134,13 +140,14 @@ class _Body extends StatelessWidget {
     );
   }
 
-  Future<void> _confirmReset(BuildContext context, ProgressState progress) async {
+  Future<void> _confirmReset(
+      BuildContext context, ProgressState progress) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Reset Progress?'),
         content: const Text(
-            'This will clear all completions, your streak, and review history.'),
+            'This will clear all completions, your streak, scores, and review history.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -165,10 +172,10 @@ class _ProgressHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs    = Theme.of(context).colorScheme;
-    final tt    = Theme.of(context).textTheme;
-    final count = progress.completedCount;
-    final ratio = progress.completionRatio;
+    final cs     = Theme.of(context).colorScheme;
+    final tt     = Theme.of(context).textTheme;
+    final count  = progress.completedCount;
+    final ratio  = progress.completionRatio;
     final streak = progress.currentStreak;
 
     return Container(
@@ -176,7 +183,6 @@ class _ProgressHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(24, 4, 24, 20),
       child: Row(
         children: [
-          // Circular progress
           TweenAnimationBuilder<double>(
             tween: Tween(begin: 0, end: ratio),
             duration: const Duration(milliseconds: 900),
@@ -204,7 +210,8 @@ class _ProgressHeader extends StatelessWidget {
                               height: 1)),
                       Text('/ 30',
                           style: tt.labelSmall?.copyWith(
-                              color: cs.onPrimary.withValues(alpha: 0.75))),
+                              color:
+                                  cs.onPrimary.withValues(alpha: 0.75))),
                     ],
                   ),
                 ],
@@ -222,16 +229,16 @@ class _ProgressHeader extends StatelessWidget {
                       : count == 30
                           ? 'Challenge Complete!'
                           : 'Keep Going!',
-                  style: tt.titleMedium
-                      ?.copyWith(color: cs.onPrimary, fontWeight: FontWeight.w700),
+                  style: tt.titleMedium?.copyWith(
+                      color: cs.onPrimary, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   count == 0
                       ? 'Start with Day 1'
                       : '$count day${count == 1 ? '' : 's'} · ${(ratio * 100).round()}%',
-                  style: tt.bodySmall
-                      ?.copyWith(color: cs.onPrimary.withValues(alpha: 0.85)),
+                  style: tt.bodySmall?.copyWith(
+                      color: cs.onPrimary.withValues(alpha: 0.85)),
                 ),
                 if (streak > 0) ...[
                   const SizedBox(height: 8),
@@ -294,7 +301,8 @@ class _StreakBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFFFF7ED),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFFB923C).withValues(alpha: 0.6)),
+        border: Border.all(
+            color: const Color(0xFFFB923C).withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
@@ -314,8 +322,9 @@ class _StreakBanner extends StatelessWidget {
                 ),
                 Text(
                   'Your $streak-day streak expires in ~$hoursLeft h. '
-                  'Complete today\'s test to keep it.',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF9A3412)),
+                  "Complete today's test to keep it.",
+                  style: const TextStyle(
+                      fontSize: 12, color: Color(0xFF9A3412)),
                 ),
               ],
             ),
@@ -346,11 +355,9 @@ class _ReviewSection extends StatelessWidget {
             children: [
               Icon(Icons.history_edu_rounded, size: 16, color: cs.primary),
               const SizedBox(width: 6),
-              Text(
-                'Review',
-                style: tt.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700, color: cs.onSurface),
-              ),
+              Text('Review',
+                  style:
+                      tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(width: 6),
               Container(
                 padding:
@@ -369,8 +376,8 @@ class _ReviewSection extends StatelessWidget {
               ),
               const Spacer(),
               Text('Most struggled first',
-                  style:
-                      tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                  style: tt.labelSmall
+                      ?.copyWith(color: cs.onSurfaceVariant)),
             ],
           ),
         ),
@@ -380,8 +387,7 @@ class _ReviewSection extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: struggles.length,
-            itemBuilder: (_, i) =>
-                _StruggleCard(record: struggles[i]),
+            itemBuilder: (_, i) => _StruggleCard(record: struggles[i]),
           ),
         ),
         const SizedBox(height: 4),
@@ -426,8 +432,8 @@ class _StruggleCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               record.dayTopic,
-              style: tt.labelSmall?.copyWith(
-                  color: cs.onSurface.withValues(alpha: 0.6)),
+              style: tt.labelSmall
+                  ?.copyWith(color: cs.onSurface.withValues(alpha: 0.6)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -435,8 +441,8 @@ class _StruggleCard extends StatelessWidget {
             Expanded(
               child: Text(
                 record.prompt,
-                style: tt.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w500, height: 1.3),
+                style: tt.bodySmall
+                    ?.copyWith(fontWeight: FontWeight.w500, height: 1.3),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -469,9 +475,7 @@ class _FailBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: cs.error,
-        borderRadius: BorderRadius.circular(10),
-      ),
+          color: cs.error, borderRadius: BorderRadius.circular(10)),
       child: Text(
         '×$count',
         style: TextStyle(
@@ -499,7 +503,6 @@ class _ReviewSheet extends StatelessWidget {
         controller: controller,
         padding: const EdgeInsets.all(20),
         children: [
-          // Handle
           Center(
             child: Container(
               width: 36,
@@ -511,13 +514,13 @@ class _ReviewSheet extends StatelessWidget {
               ),
             ),
           ),
-          // Title row
           Row(
             children: [
               Chip(
                 label: Text('Day ${record.dayNumber}'),
                 backgroundColor: cs.errorContainer,
-                labelStyle: TextStyle(color: cs.onErrorContainer,
+                labelStyle: TextStyle(
+                    color: cs.onErrorContainer,
                     fontWeight: FontWeight.w600),
                 side: BorderSide.none,
                 padding: EdgeInsets.zero,
@@ -526,12 +529,11 @@ class _ReviewSheet extends StatelessWidget {
               _FailBadge(count: record.failedAttempts),
               const Spacer(),
               Text(record.dayTopic,
-                  style: tt.labelSmall
-                      ?.copyWith(color: cs.onSurfaceVariant)),
+                  style:
+                      tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
             ],
           ),
           const SizedBox(height: 14),
-          // Question prompt
           Text('Question',
               style: tt.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700, color: cs.error)),
@@ -539,7 +541,6 @@ class _ReviewSheet extends StatelessWidget {
           Text(record.prompt,
               style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 16),
-          // Solution
           if (record.expectedOutput != null) ...[
             _SheetSection(
               icon: Icons.output,
@@ -561,7 +562,7 @@ class _ReviewSheet extends StatelessWidget {
             const SizedBox(height: 12),
           ],
           if (record.expectedOutput == null && record.explanation == null)
-            Text('No solution recorded for this question.',
+            Text('No solution recorded.',
                 style: tt.bodySmall?.copyWith(color: cs.outline)),
           const SizedBox(height: 20),
           FilledButton(
@@ -612,7 +613,9 @@ class _SheetSection extends StatelessWidget {
                 ),
                 child: Text(value,
                     style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 12, height: 1.4)),
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        height: 1.4)),
               )
             : Text(value,
                 style: const TextStyle(fontSize: 13, height: 1.55)),
@@ -629,28 +632,32 @@ class _PhaseLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
     return Container(
       color: cs.surfaceContainerLow,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Wrap(
         spacing: 12,
         runSpacing: 6,
-        children: _phaseNames.entries.map((e) {
+        children: phaseNameMap.entries.map((e) {
           final color = phaseColor(e.key);
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                  width: 10,
-                  height: 10,
-                  decoration:
-                      BoxDecoration(color: color, shape: BoxShape.circle)),
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                    color: color, shape: BoxShape.circle),
+              ),
               const SizedBox(width: 4),
-              Text(e.value,
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelSmall
-                      ?.copyWith(color: cs.onSurfaceVariant)),
+              Text(
+                e.value,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: cs.onSurfaceVariant),
+              ),
             ],
           );
         }).toList(),
@@ -675,14 +682,16 @@ class _DayCard extends StatelessWidget {
     final done   = status == DayStatus.completed;
 
     return Material(
-      color: locked ? cs.surfaceContainerLow : color.withValues(alpha: 0.10),
+      color: locked
+          ? cs.surfaceContainerLow
+          : color.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: locked
             ? () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(
-                      'Complete Day ${day.dayNumber - 1} first.'),
+                  content:
+                      Text('Complete Day ${day.dayNumber - 1} first.'),
                   behavior: SnackBarBehavior.floating,
                   duration: const Duration(seconds: 2),
                 ))
@@ -716,7 +725,8 @@ class _DayCard extends StatelessWidget {
                   Text('${day.dayNumber}',
                       style: tt.titleLarge?.copyWith(
                           fontWeight: FontWeight.w800,
-                          color: locked ? cs.onSurfaceVariant : color,
+                          color:
+                              locked ? cs.onSurfaceVariant : color,
                           height: 1)),
                   if (locked)
                     Icon(Icons.lock_outline,

@@ -4,11 +4,19 @@ import 'package:flutter/material.dart';
 import '../models/day_content.dart';
 import '../models/progress_state.dart';
 import '../services/verification_service.dart';
+import '../utils/phase_colors.dart';
 import '../widgets/progress_scope.dart';
+import 'completion_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
   final DayContent day;
-  const VerificationScreen({super.key, required this.day});
+  final bool isPracticeMode;
+
+  const VerificationScreen({
+    super.key,
+    required this.day,
+    this.isPracticeMode = false,
+  });
 
   @override
   State<VerificationScreen> createState() => _VerificationScreenState();
@@ -22,9 +30,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   PracticeQuestion? _question;
   VerificationResult? _result;
-  bool _showSolution  = false;
-  bool _submitting    = false;
-  int  _attemptCount  = 0;
+  bool _showSolution = false;
+  bool _submitting   = false;
+  int  _attemptCount = 0;
 
   @override
   void initState() {
@@ -53,21 +61,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
       _question = easy.isEmpty ? null : easy[Random().nextInt(easy.length)];
     }
     setState(() {
-      _result      = null;
-      _showSolution= false;
+      _result       = null;
+      _showSolution = false;
       _answerCtrl.clear();
       _reasoningCtrl.clear();
       _attemptCount++;
     });
   }
 
-  Color get _accentColor {
-    const colors = {
-      1: Color(0xFFF59E0B), 2: Color(0xFF3B82F6), 3: Color(0xFF10B981),
-      4: Color(0xFF8B5CF6), 5: Color(0xFFEF4444), 6: Color(0xFFEC4899),
-    };
-    return colors[widget.day.phaseNumber] ?? const Color(0xFF6366F1);
-  }
+  Color get _accentColor => phaseColor(widget.day.phaseNumber);
 
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
@@ -75,20 +77,35 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
     setState(() => _submitting = true);
 
-    // Small delay for visual feedback
     Future.delayed(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+
       final result = VerificationService.verify(
         userReasoning: '${_answerCtrl.text} ${_reasoningCtrl.text}',
         question: _question!,
       );
-      setState(() {
-        _result     = result;
-        _submitting = false;
-      });
+
+      // Always record the score for stats
+      ProgressScope.of(context).recordScore(widget.day.dayNumber, result.score);
 
       if (result.verified) {
-        ProgressScope.of(context).markPassed(widget.day.dayNumber);
+        if (!widget.isPracticeMode) {
+          ProgressScope.of(context).markPassed(widget.day.dayNumber);
+        }
         _confettiCtrl.play();
+
+        // Navigate to completion screen for Day 30 (first time only)
+        if (!widget.isPracticeMode && widget.day.dayNumber == 30) {
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                    builder: (_) => const CompletionScreen()),
+                (route) => route.isFirst,
+              );
+            }
+          });
+        }
       } else {
         ProgressScope.of(context).recordStruggle(
           dayNumber: widget.day.dayNumber,
@@ -96,6 +113,11 @@ class _VerificationScreenState extends State<VerificationScreen> {
           question:  _question!,
         );
       }
+
+      setState(() {
+        _result     = result;
+        _submitting = false;
+      });
     });
   }
 
@@ -110,7 +132,11 @@ class _VerificationScreenState extends State<VerificationScreen> {
           appBar: AppBar(
             backgroundColor: _accentColor,
             foregroundColor: Colors.white,
-            title: Text('Day ${widget.day.dayNumber} — Reasoning Test'),
+            title: Text(
+              widget.isPracticeMode
+                  ? 'Day ${widget.day.dayNumber} — Practice'
+                  : 'Day ${widget.day.dayNumber} — Reasoning Test',
+            ),
             actions: [
               if (_question != null)
                 IconButton(
@@ -121,29 +147,36 @@ class _VerificationScreenState extends State<VerificationScreen> {
             ],
           ),
           body: _question == null
-              ? _NoQuestionsView(dayNumber: widget.day.dayNumber, color: _accentColor)
+              ? _NoQuestionsView(
+                  dayNumber:      widget.day.dayNumber,
+                  color:          _accentColor,
+                  isPracticeMode: widget.isPracticeMode,
+                )
               : _TestBody(
-                  question:    _question!,
-                  result:      _result,
-                  formKey:     _formKey,
-                  answerCtrl:  _answerCtrl,
-                  reasonCtrl:  _reasoningCtrl,
-                  showSolution:_showSolution,
-                  submitting:  _submitting,
-                  accentColor: _accentColor,
-                  attemptCount:_attemptCount,
-                  onSubmit:    _submit,
-                  onShowSolution: () => setState(() => _showSolution = true),
+                  question:       _question!,
+                  result:         _result,
+                  formKey:        _formKey,
+                  answerCtrl:     _answerCtrl,
+                  reasonCtrl:     _reasoningCtrl,
+                  showSolution:   _showSolution,
+                  submitting:     _submitting,
+                  accentColor:    _accentColor,
+                  attemptCount:   _attemptCount,
+                  isPracticeMode: widget.isPracticeMode,
+                  isDay30:        widget.day.dayNumber == 30,
+                  onSubmit:       _submit,
+                  onShowSolution: () =>
+                      setState(() => _showSolution = true),
                   onTryAnother:   _pickQuestion,
-                  onDone: () => Navigator.of(context).pop(),
+                  onDone:         () => Navigator.of(context).pop(),
                 ),
         ),
-        // Confetti overlay — fires from top-center on verification success
+        // Confetti overlay
         Align(
           alignment: Alignment.topCenter,
           child: ConfettiWidget(
             confettiController: _confettiCtrl,
-            blastDirection: 3.14 / 2, // straight down
+            blastDirection: 3.14 / 2,
             emissionFrequency: 0.05,
             numberOfParticles: 20,
             maxBlastForce: 30,
@@ -168,7 +201,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
 class _NoQuestionsView extends StatelessWidget {
   final int dayNumber;
   final Color color;
-  const _NoQuestionsView({required this.dayNumber, required this.color});
+  final bool isPracticeMode;
+  const _NoQuestionsView({
+    required this.dayNumber,
+    required this.color,
+    required this.isPracticeMode,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -186,21 +224,31 @@ class _NoQuestionsView extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            Text(
-              'Mark this day as complete to continue.',
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: color),
-              onPressed: () {
-                ProgressScope.of(context).markPassed(dayNumber);
-                Navigator.of(context).pop();
-              },
-              icon: const Icon(Icons.check),
-              label: const Text('Mark as Complete'),
-            ),
+            if (!isPracticeMode) ...[
+              Text(
+                'Mark this day as complete to continue.',
+                style: Theme.of(context).textTheme.bodyMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: color),
+                onPressed: () {
+                  ProgressScope.of(context).markPassed(dayNumber);
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.check),
+                label: const Text('Mark as Complete'),
+              ),
+            ] else ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: color),
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Go Back'),
+              ),
+            ],
           ],
         ),
       ),
@@ -220,6 +268,8 @@ class _TestBody extends StatelessWidget {
   final bool submitting;
   final Color accentColor;
   final int attemptCount;
+  final bool isPracticeMode;
+  final bool isDay30;
   final VoidCallback onSubmit;
   final VoidCallback onShowSolution;
   final VoidCallback onTryAnother;
@@ -235,6 +285,8 @@ class _TestBody extends StatelessWidget {
     required this.submitting,
     required this.accentColor,
     required this.attemptCount,
+    required this.isPracticeMode,
+    required this.isDay30,
     required this.onSubmit,
     required this.onShowSolution,
     required this.onTryAnother,
@@ -243,7 +295,6 @@ class _TestBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final answered = result != null;
 
     return SingleChildScrollView(
@@ -253,11 +304,17 @@ class _TestBody extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Question card ───────────────────────────────────────────────
+            // Practice mode banner
+            if (isPracticeMode) ...[
+              _PracticeModeBanner(color: accentColor),
+              const SizedBox(height: 12),
+            ],
+
+            // Question
             _QuestionCard(question: question, accentColor: accentColor),
             const SizedBox(height: 20),
 
-            // ── Answer inputs (shown only before submission) ────────────────
+            // Input fields (before submission)
             if (!answered) ...[
               TextFormField(
                 controller: answerCtrl,
@@ -269,8 +326,9 @@ class _TestBody extends StatelessWidget {
                 ),
                 maxLines: 3,
                 textInputAction: TextInputAction.next,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Please enter your answer' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Please enter your answer'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -278,16 +336,20 @@ class _TestBody extends StatelessWidget {
                 decoration: InputDecoration(
                   labelText: 'Your Reasoning',
                   hintText:
-                      'Why is this the correct approach? Explain the concept in your own words…',
-                  prefixIcon: Icon(Icons.psychology_outlined, color: accentColor),
+                      'Why is this the correct approach? Explain in your own words…',
+                  prefixIcon:
+                      Icon(Icons.psychology_outlined, color: accentColor),
                   alignLabelWithHint: true,
                 ),
                 maxLines: 5,
                 textInputAction: TextInputAction.done,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Please explain your reasoning';
-                  final words = v.trim().split(RegExp(r'\s+'));
-                  if (words.length < 5) return 'Write at least a few sentences';
+                  if (v == null || v.trim().isEmpty) {
+                    return 'Please explain your reasoning';
+                  }
+                  if (v.trim().split(RegExp(r'\s+')).length < 5) {
+                    return 'Write at least a few sentences';
+                  }
                   return null;
                 },
               ),
@@ -313,31 +375,37 @@ class _TestBody extends StatelessWidget {
               ),
             ],
 
-            // ── Result ──────────────────────────────────────────────────────
+            // Result
             if (result != null) ...[
-              _ResultCard(
-                result: result!,
-                accentColor: accentColor,
-              ),
+              _ResultCard(result: result!, accentColor: accentColor),
               const SizedBox(height: 16),
 
-              // Verified → completion banner + done button
               if (result!.verified) ...[
-                _SuccessBanner(accentColor: accentColor),
+                _SuccessBanner(
+                    accentColor: accentColor,
+                    isPracticeMode: isPracticeMode),
                 const SizedBox(height: 16),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    minimumSize: const Size(double.infinity, 52),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                // Day 30 normal mode — auto-navigates to completion screen
+                if (!isPracticeMode && isDay30)
+                  _WaitingRow(color: accentColor)
+                else
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: isPracticeMode
+                          ? accentColor
+                          : Colors.green.shade600,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: onDone,
+                    icon: Icon(isPracticeMode
+                        ? Icons.close_rounded
+                        : Icons.arrow_back_rounded),
+                    label: Text(
+                        isPracticeMode ? 'Close Practice' : 'Back to Day'),
                   ),
-                  onPressed: onDone,
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  label: const Text('Back to Day'),
-                ),
               ] else ...[
-                // Not verified → show solution / try again
                 if (!showSolution)
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -350,7 +418,8 @@ class _TestBody extends StatelessWidget {
                     label: const Text('Show Solution'),
                   ),
                 if (showSolution) ...[
-                  _SolutionReveal(question: question, accentColor: accentColor),
+                  _SolutionReveal(
+                      question: question, accentColor: accentColor),
                   const SizedBox(height: 12),
                 ],
                 const SizedBox(height: 8),
@@ -374,12 +443,72 @@ class _TestBody extends StatelessWidget {
   }
 }
 
+// ── Practice mode banner ──────────────────────────────────────────────────────
+
+class _PracticeModeBanner extends StatelessWidget {
+  final Color color;
+  const _PracticeModeBanner({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.replay_rounded, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Practice mode — this won\'t change your completion status.',
+              style: TextStyle(
+                  color: color, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Waiting row (Day 30 auto-nav) ─────────────────────────────────────────────
+
+class _WaitingRow extends StatelessWidget {
+  final Color color;
+  const _WaitingRow({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(
+              strokeWidth: 2, valueColor: AlwaysStoppedAnimation(color)),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          'Loading your results…',
+          style: TextStyle(color: color, fontWeight: FontWeight.w500),
+        ),
+      ],
+    );
+  }
+}
+
 // ── Question display card ─────────────────────────────────────────────────────
 
 class _QuestionCard extends StatelessWidget {
   final PracticeQuestion question;
   final Color accentColor;
-  const _QuestionCard({required this.question, required this.accentColor});
+  const _QuestionCard(
+      {required this.question, required this.accentColor});
 
   @override
   Widget build(BuildContext context) {
@@ -389,12 +518,12 @@ class _QuestionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accentColor.withValues(alpha: 0.4), width: 1.5),
+        border: Border.all(
+            color: accentColor.withValues(alpha: 0.4), width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
@@ -409,10 +538,9 @@ class _QuestionCard extends StatelessWidget {
                 Text(
                   'Question',
                   style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: accentColor,
-                  ),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: accentColor),
                 ),
               ],
             ),
@@ -444,10 +572,9 @@ class _QuestionCard extends StatelessWidget {
                       child: Text(
                         question.code!,
                         style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 12.5,
-                          height: 1.5,
-                        ),
+                            fontFamily: 'monospace',
+                            fontSize: 12.5,
+                            height: 1.5),
                       ),
                     ),
                   ),
@@ -472,7 +599,6 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final verified = result.verified;
     final color    = verified ? Colors.green.shade600 : Colors.orange.shade700;
-    final cs       = Theme.of(context).colorScheme;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -487,7 +613,9 @@ class _ResultCard extends StatelessWidget {
           Row(
             children: [
               Icon(
-                verified ? Icons.verified_rounded : Icons.warning_amber_rounded,
+                verified
+                    ? Icons.verified_rounded
+                    : Icons.warning_amber_rounded,
                 color: color,
                 size: 22,
               ),
@@ -495,15 +623,14 @@ class _ResultCard extends StatelessWidget {
               Text(
                 verified ? 'Verified ✓' : 'Not Quite Yet',
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: color,
-                ),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: color),
               ),
               const Spacer(),
-              // Score pill
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
@@ -511,16 +638,16 @@ class _ResultCard extends StatelessWidget {
                 child: Text(
                   '${(result.score * 100).round()}%',
                   style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(result.feedback, style: Theme.of(context).textTheme.bodyMedium),
+          Text(result.feedback,
+              style: Theme.of(context).textTheme.bodyMedium),
           if (result.matchedTerms.isNotEmpty) ...[
             const SizedBox(height: 10),
             Wrap(
@@ -555,7 +682,8 @@ class _TermChip extends StatelessWidget {
   final String term;
   final bool matched;
   final Color color;
-  const _TermChip({required this.term, required this.matched, required this.color});
+  const _TermChip(
+      {required this.term, required this.matched, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -569,11 +697,7 @@ class _TermChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            matched ? Icons.check : Icons.close,
-            size: 10,
-            color: color,
-          ),
+          Icon(matched ? Icons.check : Icons.close, size: 10, color: color),
           const SizedBox(width: 4),
           Text(term, style: TextStyle(fontSize: 11, color: color)),
         ],
@@ -586,7 +710,9 @@ class _TermChip extends StatelessWidget {
 
 class _SuccessBanner extends StatelessWidget {
   final Color accentColor;
-  const _SuccessBanner({required this.accentColor});
+  final bool isPracticeMode;
+  const _SuccessBanner(
+      {required this.accentColor, required this.isPracticeMode});
 
   @override
   Widget build(BuildContext context) {
@@ -600,25 +726,31 @@ class _SuccessBanner extends StatelessWidget {
           ],
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.green.shade400.withValues(alpha: 0.5)),
+        border: Border.all(
+            color: Colors.green.shade400.withValues(alpha: 0.5)),
       ),
       child: Row(
         children: [
-          const Text('🎉', style: TextStyle(fontSize: 28)),
+          Text(
+            isPracticeMode ? '💪' : '🎉',
+            style: const TextStyle(fontSize: 28),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Day Complete!',
+                  isPracticeMode ? 'Great Recall!' : 'Day Complete!',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: Colors.green.shade700,
                       ),
                 ),
                 Text(
-                  'Next day is now unlocked. Keep the momentum!',
+                  isPracticeMode
+                      ? 'Keep practicing to solidify the concepts.'
+                      : 'Next day is now unlocked. Keep the momentum!',
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -638,7 +770,8 @@ class _SuccessBanner extends StatelessWidget {
 class _SolutionReveal extends StatelessWidget {
   final PracticeQuestion question;
   final Color accentColor;
-  const _SolutionReveal({required this.question, required this.accentColor});
+  const _SolutionReveal(
+      {required this.question, required this.accentColor});
 
   @override
   Widget build(BuildContext context) {
@@ -657,10 +790,9 @@ class _SolutionReveal extends StatelessWidget {
           Text(
             'Solution',
             style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: accentColor,
-              fontSize: 13,
-            ),
+                fontWeight: FontWeight.w700,
+                color: accentColor,
+                fontSize: 13),
           ),
           const SizedBox(height: 8),
           if (question.expectedOutput != null) ...[
@@ -716,7 +848,8 @@ class _RevealRow extends StatelessWidget {
           Icon(icon, size: 13, color: color),
           const SizedBox(width: 5),
           Text(label,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: color)),
         ]),
         const SizedBox(height: 4),
         mono
@@ -728,9 +861,11 @@ class _RevealRow extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(value,
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12)),
               )
-            : Text(value, style: const TextStyle(fontSize: 13, height: 1.5)),
+            : Text(value,
+                style: const TextStyle(fontSize: 13, height: 1.5)),
       ],
     );
   }

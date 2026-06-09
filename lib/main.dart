@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'models/progress_state.dart';
 import 'screens/home_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'widgets/progress_scope.dart';
 
 void main() async {
@@ -23,7 +24,9 @@ class Frontend30App extends StatelessWidget {
         theme: _buildTheme(Brightness.light),
         darkTheme: _buildTheme(Brightness.dark),
         themeMode: ThemeMode.system,
-        home: const HomeScreen(),
+        home: progress.isFirstLaunch
+            ? const OnboardingScreen()
+            : const HomeScreen(),
       ),
     );
   }

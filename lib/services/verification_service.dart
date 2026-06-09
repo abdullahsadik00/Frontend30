@@ -4,7 +4,7 @@ import '../models/day_content.dart';
 
 class VerificationResult {
   final bool verified;
-  final double score;        // 0.0 – 1.0
+  final double score;
   final List<String> matchedTerms;
   final List<String> missedTerms;
   final String feedback;
@@ -21,7 +21,6 @@ class VerificationResult {
 // ── Service ───────────────────────────────────────────────────────────────────
 
 class VerificationService {
-  // Common words that carry no technical signal
   static const _stopWords = {
     'the', 'is', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had',
     'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can',
@@ -35,13 +34,36 @@ class VerificationService {
     'not', 'its', 'run', 'runs', 'call', 'calls', 'called', 'see', 'look',
     'adds', 'add', 'make', 'makes', 'made', 'show', 'shows', 'note', 'line',
     'mean', 'means', 'returns', 'creates', 'create', 'object', 'value', 'values',
+    'code', 'output', 'result', 'answer', 'example', 'below', 'above', 'like',
+    'when', 'then', 'well', 'need', 'want', 'able', 'way', 'they', 'them',
   };
 
-  // Minimum word length to consider as a technical term
+  // Minimum reasoning length in words
+  static const _minWords = 15;
+
+  // Matching threshold (fraction of key concepts to cover)
+  static const _threshold = 0.40;
+
+  // Minimum term length
   static const _minLen = 4;
 
-  // Required fraction of key terms the user must cover
-  static const _threshold = 0.30;
+  // ── Stemmer ───────────────────────────────────────────────────────────────
+
+  // Light suffix stripper so "closures" matches "closure", "hoisting" matches "hoist"
+  static String _stem(String word) {
+    const suffixes = [
+      'tions', 'tion', 'ness', 'ment', 'ally', 'ity', 'ing', 'ied',
+      'ies', 'ers', 'er', 'ed', 'es', 's',
+    ];
+    for (final s in suffixes) {
+      if (word.endsWith(s) && word.length - s.length >= 3) {
+        return word.substring(0, word.length - s.length);
+      }
+    }
+    return word;
+  }
+
+  // ── Term extraction ───────────────────────────────────────────────────────
 
   static List<String> extractKeyTerms(String text) {
     if (text.isEmpty) return [];
@@ -54,46 +76,50 @@ class VerificationService {
         .toList();
   }
 
+  // ── Verify ────────────────────────────────────────────────────────────────
+
   static VerificationResult verify({
     required String userReasoning,
     required PracticeQuestion question,
   }) {
-    final reasoning = userReasoning.trim();
+    final reasoning  = userReasoning.trim();
+    final wordCount  = reasoning.isEmpty
+        ? 0
+        : reasoning.split(RegExp(r'\s+')).length;
 
-    // If reasoning is trivially short, reject immediately
-    if (reasoning.split(RegExp(r'\s+')).length < 5) {
-      return const VerificationResult(
+    // Reject if too short
+    if (wordCount < _minWords) {
+      return VerificationResult(
         verified: false,
         score: 0,
-        matchedTerms: [],
-        missedTerms: [],
-        feedback: 'Please write a more detailed explanation (at least a few sentences).',
+        matchedTerms: const [],
+        missedTerms: const [],
+        feedback: 'Your explanation is too brief ($wordCount words). '
+            'Write at least $_minWords words — aim for 2–3 full sentences explaining the concept.',
       );
     }
 
-    // Build solution corpus from expectedOutput + explanation
+    // Build solution corpus
     final solutionText = [
       question.expectedOutput ?? '',
-      question.explanation ?? '',
+      question.explanation   ?? '',
     ].join(' ');
 
     if (solutionText.trim().isEmpty) {
-      // No reference solution — give benefit of doubt to substantive answers
-      final wordCount = reasoning.split(RegExp(r'\s+')).length;
-      final ok = wordCount >= 15;
+      final ok = wordCount >= 20;
       return VerificationResult(
         verified: ok,
         score: ok ? 1.0 : 0.0,
         matchedTerms: const [],
         missedTerms: const [],
         feedback: ok
-            ? 'Good effort! No reference solution to compare — keeping your answer.'
-            : 'Please add more detail to your reasoning.',
+            ? 'No reference solution to compare — accepting your detailed answer.'
+            : 'Please add more detail to your reasoning (at least 20 words).',
       );
     }
 
-    final solutionTerms = extractKeyTerms(solutionText);
-    if (solutionTerms.isEmpty) {
+    final rawSolutionTerms = extractKeyTerms(solutionText);
+    if (rawSolutionTerms.isEmpty) {
       return const VerificationResult(
         verified: true,
         score: 1.0,
@@ -103,37 +129,49 @@ class VerificationService {
       );
     }
 
+    // Deduplicate solution terms by stem (group "closure"/"closures" as one concept)
+    final stemToTerm = <String, String>{};
+    for (final term in rawSolutionTerms) {
+      stemToTerm.putIfAbsent(_stem(term), () => term);
+    }
+
+    // Build normalized set of user's terms for fast lookup
+    final userTerms = extractKeyTerms(reasoning).map(_stem).toSet();
     final reasoningLower = reasoning.toLowerCase();
+
     final matched = <String>[];
     final missed  = <String>[];
 
-    for (final term in solutionTerms) {
-      if (reasoningLower.contains(term)) {
-        matched.add(term);
+    for (final entry in stemToTerm.entries) {
+      final stemmed  = entry.key;
+      final original = entry.value;
+      // Hit if: normalized form matches OR original substring present
+      if (userTerms.contains(stemmed) || reasoningLower.contains(original)) {
+        matched.add(original);
       } else {
-        missed.add(term);
+        missed.add(original);
       }
     }
 
-    final score = matched.length / solutionTerms.length;
+    final score = matched.length / stemToTerm.length;
     final pct   = (score * 100).round();
 
-    String feedback;
+    final String feedback;
     if (score >= _threshold) {
-      feedback = 'Your reasoning covers the key concepts ($pct% match). '
-          'Key terms found: ${matched.take(5).join(', ')}.';
+      final topMatched = matched.take(5).join(', ');
+      feedback = 'Solid reasoning — $pct% of key concepts covered. '
+          'Terms matched: $topMatched.';
     } else {
-      final topMissed = missed.take(4).join(', ');
-      feedback = 'Your reasoning scored $pct% — below the passing threshold of '
-          '${(_threshold * 100).round()}%. '
-          'Try to address: $topMissed.';
+      final topMissed = missed.take(3).join(', ');
+      feedback = 'You scored $pct% (need ${(_threshold * 100).round()}% to pass). '
+          'Try to explain: $topMissed.';
     }
 
     return VerificationResult(
       verified: score >= _threshold,
       score: score,
       matchedTerms: matched,
-      missedTerms: missed,
+      missedTerms:  missed,
       feedback: feedback,
     );
   }
