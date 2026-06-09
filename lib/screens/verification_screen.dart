@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import '../models/day_content.dart';
 import '../models/progress_state.dart';
@@ -17,6 +18,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   final _answerCtrl    = TextEditingController();
   final _reasoningCtrl = TextEditingController();
   final _formKey       = GlobalKey<FormState>();
+  late final ConfettiController _confettiCtrl;
 
   PracticeQuestion? _question;
   VerificationResult? _result;
@@ -27,6 +29,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   @override
   void initState() {
     super.initState();
+    _confettiCtrl = ConfettiController(duration: const Duration(seconds: 3));
     _pickQuestion();
   }
 
@@ -34,6 +37,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   void dispose() {
     _answerCtrl.dispose();
     _reasoningCtrl.dispose();
+    _confettiCtrl.dispose();
     super.dispose();
   }
 
@@ -84,6 +88,13 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
       if (result.verified) {
         ProgressScope.of(context).markPassed(widget.day.dayNumber);
+        _confettiCtrl.play();
+      } else {
+        ProgressScope.of(context).recordStruggle(
+          dayNumber: widget.day.dayNumber,
+          dayTopic:  widget.day.shortTopic,
+          question:  _question!,
+        );
       }
     });
   }
@@ -92,38 +103,62 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      backgroundColor: cs.surface,
-      appBar: AppBar(
-        backgroundColor: _accentColor,
-        foregroundColor: Colors.white,
-        title: Text('Day ${widget.day.dayNumber} — Reasoning Test'),
-        actions: [
-          if (_question != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Try a different question',
-              onPressed: _result == null ? _pickQuestion : null,
-            ),
-        ],
-      ),
-      body: _question == null
-          ? _NoQuestionsView(dayNumber: widget.day.dayNumber, color: _accentColor)
-          : _TestBody(
-              question:    _question!,
-              result:      _result,
-              formKey:     _formKey,
-              answerCtrl:  _answerCtrl,
-              reasonCtrl:  _reasoningCtrl,
-              showSolution:_showSolution,
-              submitting:  _submitting,
-              accentColor: _accentColor,
-              attemptCount:_attemptCount,
-              onSubmit:    _submit,
-              onShowSolution: () => setState(() => _showSolution = true),
-              onTryAnother:   _pickQuestion,
-              onDone: () => Navigator.of(context).pop(),
-            ),
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: cs.surface,
+          appBar: AppBar(
+            backgroundColor: _accentColor,
+            foregroundColor: Colors.white,
+            title: Text('Day ${widget.day.dayNumber} — Reasoning Test'),
+            actions: [
+              if (_question != null)
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Try a different question',
+                  onPressed: _result == null ? _pickQuestion : null,
+                ),
+            ],
+          ),
+          body: _question == null
+              ? _NoQuestionsView(dayNumber: widget.day.dayNumber, color: _accentColor)
+              : _TestBody(
+                  question:    _question!,
+                  result:      _result,
+                  formKey:     _formKey,
+                  answerCtrl:  _answerCtrl,
+                  reasonCtrl:  _reasoningCtrl,
+                  showSolution:_showSolution,
+                  submitting:  _submitting,
+                  accentColor: _accentColor,
+                  attemptCount:_attemptCount,
+                  onSubmit:    _submit,
+                  onShowSolution: () => setState(() => _showSolution = true),
+                  onTryAnother:   _pickQuestion,
+                  onDone: () => Navigator.of(context).pop(),
+                ),
+        ),
+        // Confetti overlay — fires from top-center on verification success
+        Align(
+          alignment: Alignment.topCenter,
+          child: ConfettiWidget(
+            confettiController: _confettiCtrl,
+            blastDirection: 3.14 / 2, // straight down
+            emissionFrequency: 0.05,
+            numberOfParticles: 20,
+            maxBlastForce: 30,
+            minBlastForce: 10,
+            gravity: 0.3,
+            colors: [
+              _accentColor,
+              Colors.green.shade400,
+              Colors.yellow.shade600,
+              Colors.pink.shade300,
+              Colors.blue.shade300,
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

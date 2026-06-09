@@ -1,37 +1,31 @@
 import 'package:flutter/material.dart';
 import '../models/day_content.dart';
 import '../models/progress_state.dart';
+import '../models/struggle_record.dart';
 import '../services/curriculum_service.dart';
 import '../widgets/progress_scope.dart';
 import 'day_detail_screen.dart';
 
-// ── Phase metadata ────────────────────────────────────────────────────────────
+// ── Phase palette ─────────────────────────────────────────────────────────────
 
 const _phaseColors = {
-  1: Color(0xFFF59E0B), // amber  — JS
-  2: Color(0xFF3B82F6), // blue   — TS
-  3: Color(0xFF10B981), // emerald — React
-  4: Color(0xFF8B5CF6), // violet — Next.js
-  5: Color(0xFFEF4444), // red    — System Design
-  6: Color(0xFFEC4899), // pink   — Interview
+  1: Color(0xFFF59E0B),
+  2: Color(0xFF3B82F6),
+  3: Color(0xFF10B981),
+  4: Color(0xFF8B5CF6),
+  5: Color(0xFFEF4444),
+  6: Color(0xFFEC4899),
 };
-
 const _phaseNames = {
-  1: 'JavaScript',
-  2: 'TypeScript',
-  3: 'React',
-  4: 'Next.js',
-  5: 'Sys Design',
-  6: 'Interview',
+  1: 'JavaScript', 2: 'TypeScript', 3: 'React',
+  4: 'Next.js',    5: 'Sys Design', 6: 'Interview',
 };
-
 Color phaseColor(int n) => _phaseColors[n] ?? const Color(0xFF6366F1);
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -50,14 +44,14 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: FutureBuilder<List<DayContent>>(
         future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+        builder: (ctx, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
+          if (snap.hasError) {
+            return Center(child: Text('Error: ${snap.error}'));
           }
-          return _Body(days: snapshot.data!);
+          return _Body(days: snap.data!);
         },
       ),
     );
@@ -73,9 +67,8 @@ class _Body extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final progress = ProgressScope.of(context);
-    final cs = Theme.of(context).colorScheme;
-
-    final columns = MediaQuery.of(context).size.width > 600 ? 5 : 3;
+    final cs       = Theme.of(context).colorScheme;
+    final columns  = MediaQuery.of(context).size.width > 600 ? 5 : 3;
 
     return CustomScrollView(
       slivers: [
@@ -85,11 +78,8 @@ class _Body extends StatelessWidget {
           expandedHeight: 0,
           backgroundColor: cs.primary,
           foregroundColor: cs.onPrimary,
-          title: const Text(
-            'Frontend 30',
-            style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5),
-          ),
-          centerTitle: false,
+          title: const Text('Frontend 30',
+              style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
           actions: [
             IconButton(
               icon: const Icon(Icons.restart_alt_rounded),
@@ -99,10 +89,23 @@ class _Body extends StatelessWidget {
           ],
         ),
 
-        // ── Progress header ──────────────────────────────────────────────────
-        SliverToBoxAdapter(
-          child: _ProgressHeader(progress: progress),
-        ),
+        // ── Progress + streak header ─────────────────────────────────────────
+        SliverToBoxAdapter(child: _ProgressHeader(progress: progress)),
+
+        // ── Streak-at-risk banner ────────────────────────────────────────────
+        if (progress.isStreakAtRisk)
+          SliverToBoxAdapter(
+            child: _StreakBanner(
+              streak: progress.currentStreak,
+              hours:  progress.hoursSinceLastActivity,
+            ),
+          ),
+
+        // ── Review section (struggled questions) ─────────────────────────────
+        if (progress.struggles.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _ReviewSection(struggles: progress.struggles),
+          ),
 
         // ── Phase legend ─────────────────────────────────────────────────────
         const SliverToBoxAdapter(child: _PhaseLegend()),
@@ -119,7 +122,7 @@ class _Body extends StatelessWidget {
             ),
             delegate: SliverChildBuilderDelegate(
               (ctx, i) {
-                final day = days[i];
+                final day    = days[i];
                 final status = progress.statusFor(day.dayNumber);
                 return _DayCard(day: day, status: status);
               },
@@ -132,22 +135,25 @@ class _Body extends StatelessWidget {
   }
 
   Future<void> _confirmReset(BuildContext context, ProgressState progress) async {
-    final confirmed = await showDialog<bool>(
+    final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Reset Progress?'),
-        content: const Text('This will unlock only Day 1 and clear all completions.'),
+        content: const Text(
+            'This will clear all completions, your streak, and review history.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
             child: const Text('Reset'),
           ),
         ],
       ),
     );
-    if (confirmed == true) await progress.reset();
+    if (ok == true) await progress.reset();
   }
 }
 
@@ -159,30 +165,30 @@ class _ProgressHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs      = Theme.of(context).colorScheme;
-    final tt      = Theme.of(context).textTheme;
-    final count   = progress.completedCount;
-    final ratio   = progress.completionRatio;
-    final phaseDone = ((count / 5).floor()).clamp(0, 6);
+    final cs    = Theme.of(context).colorScheme;
+    final tt    = Theme.of(context).textTheme;
+    final count = progress.completedCount;
+    final ratio = progress.completionRatio;
+    final streak = progress.currentStreak;
 
     return Container(
       color: cs.primary,
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 4, 24, 20),
       child: Row(
         children: [
-          // Animated circular indicator
+          // Circular progress
           TweenAnimationBuilder<double>(
             tween: Tween(begin: 0, end: ratio),
             duration: const Duration(milliseconds: 900),
             curve: Curves.easeOutCubic,
-            builder: (_, value, __) => SizedBox(
-              width: 100,
-              height: 100,
+            builder: (_, v, __) => SizedBox(
+              width: 96,
+              height: 96,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   CircularProgressIndicator(
-                    value: value,
+                    value: v,
                     strokeWidth: 9,
                     strokeCap: StrokeCap.round,
                     backgroundColor: cs.onPrimary.withValues(alpha: 0.2),
@@ -191,20 +197,14 @@ class _ProgressHeader extends StatelessWidget {
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        '$count',
-                        style: tt.titleLarge?.copyWith(
-                          color: cs.onPrimary,
-                          fontWeight: FontWeight.w800,
-                          height: 1,
-                        ),
-                      ),
-                      Text(
-                        '/ 30',
-                        style: tt.labelSmall?.copyWith(
-                          color: cs.onPrimary.withValues(alpha: 0.8),
-                        ),
-                      ),
+                      Text('$count',
+                          style: tt.titleLarge?.copyWith(
+                              color: cs.onPrimary,
+                              fontWeight: FontWeight.w800,
+                              height: 1)),
+                      Text('/ 30',
+                          style: tt.labelSmall?.copyWith(
+                              color: cs.onPrimary.withValues(alpha: 0.75))),
                     ],
                   ),
                 ],
@@ -212,7 +212,6 @@ class _ProgressHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 20),
-          // Text info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -221,36 +220,403 @@ class _ProgressHeader extends StatelessWidget {
                   count == 0
                       ? '30-Day Challenge'
                       : count == 30
-                          ? 'Challenge Complete! 🎉'
+                          ? 'Challenge Complete!'
                           : 'Keep Going!',
-                  style: tt.titleMedium?.copyWith(
-                    color: cs.onPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: tt.titleMedium
+                      ?.copyWith(color: cs.onPrimary, fontWeight: FontWeight.w700),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   count == 0
                       ? 'Start with Day 1'
-                      : '$count day${count == 1 ? '' : 's'} completed · ${(ratio * 100).round()}%',
-                  style: tt.bodySmall?.copyWith(
-                    color: cs.onPrimary.withValues(alpha: 0.85),
-                  ),
+                      : '$count day${count == 1 ? '' : 's'} · ${(ratio * 100).round()}%',
+                  style: tt.bodySmall
+                      ?.copyWith(color: cs.onPrimary.withValues(alpha: 0.85)),
                 ),
-                if (phaseDone > 0 && phaseDone <= 6) ...[
+                if (streak > 0) ...[
                   const SizedBox(height: 8),
-                  Text(
-                    'On Phase $phaseDone: ${_phaseNames[phaseDone] ?? ''}',
-                    style: tt.labelSmall?.copyWith(
-                      color: cs.onPrimary.withValues(alpha: 0.7),
-                    ),
-                  ),
+                  _StreakPill(streak: streak),
                 ],
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StreakPill extends StatelessWidget {
+  final int streak;
+  const _StreakPill({required this.streak});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('🔥', style: TextStyle(fontSize: 13)),
+          const SizedBox(width: 4),
+          Text(
+            '$streak-day streak',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Streak-at-risk banner ─────────────────────────────────────────────────────
+
+class _StreakBanner extends StatelessWidget {
+  final int streak;
+  final int hours;
+  const _StreakBanner({required this.streak, required this.hours});
+
+  @override
+  Widget build(BuildContext context) {
+    final hoursLeft = 24 - hours;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFB923C).withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Text('🔥', style: TextStyle(fontSize: 22)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Streak at Risk!',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                    color: Color(0xFFC2410C),
+                  ),
+                ),
+                Text(
+                  'Your $streak-day streak expires in ~$hoursLeft h. '
+                  'Complete today\'s test to keep it.',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF9A3412)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Review section ────────────────────────────────────────────────────────────
+
+class _ReviewSection extends StatelessWidget {
+  final List<StruggleRecord> struggles;
+  const _ReviewSection({required this.struggles});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.history_edu_rounded, size: 16, color: cs.primary),
+              const SizedBox(width: 6),
+              Text(
+                'Review',
+                style: tt.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700, color: cs.onSurface),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: cs.errorContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${struggles.length}',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: cs.onErrorContainer),
+                ),
+              ),
+              const Spacer(),
+              Text('Most struggled first',
+                  style:
+                      tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 112,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: struggles.length,
+            itemBuilder: (_, i) =>
+                _StruggleCard(record: struggles[i]),
+          ),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+}
+
+class _StruggleCard extends StatelessWidget {
+  final StruggleRecord record;
+  const _StruggleCard({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return GestureDetector(
+      onTap: () => _showReviewSheet(context),
+      child: Container(
+        width: 150,
+        margin: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.errorContainer.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: cs.error.withValues(alpha: 0.3), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Day ${record.dayNumber}',
+                    style: tt.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w700, color: cs.error)),
+                _FailBadge(count: record.failedAttempts),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              record.dayTopic,
+              style: tt.labelSmall?.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.6)),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: Text(
+                record.prompt,
+                style: tt.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w500, height: 1.3),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showReviewSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _ReviewSheet(record: record),
+    );
+  }
+}
+
+class _FailBadge extends StatelessWidget {
+  final int count;
+  const _FailBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: cs.error,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '×$count',
+        style: TextStyle(
+            color: cs.onError, fontSize: 10, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class _ReviewSheet extends StatelessWidget {
+  final StruggleRecord record;
+  const _ReviewSheet({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (_, controller) => ListView(
+        controller: controller,
+        padding: const EdgeInsets.all(20),
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 18),
+              decoration: BoxDecoration(
+                color: cs.outlineVariant,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          // Title row
+          Row(
+            children: [
+              Chip(
+                label: Text('Day ${record.dayNumber}'),
+                backgroundColor: cs.errorContainer,
+                labelStyle: TextStyle(color: cs.onErrorContainer,
+                    fontWeight: FontWeight.w600),
+                side: BorderSide.none,
+                padding: EdgeInsets.zero,
+              ),
+              const SizedBox(width: 8),
+              _FailBadge(count: record.failedAttempts),
+              const Spacer(),
+              Text(record.dayTopic,
+                  style: tt.labelSmall
+                      ?.copyWith(color: cs.onSurfaceVariant)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Question prompt
+          Text('Question',
+              style: tt.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700, color: cs.error)),
+          const SizedBox(height: 6),
+          Text(record.prompt,
+              style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
+          // Solution
+          if (record.expectedOutput != null) ...[
+            _SheetSection(
+              icon: Icons.output,
+              label: 'Expected Output',
+              value: record.expectedOutput!,
+              mono: true,
+              color: cs.primary,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (record.explanation != null) ...[
+            _SheetSection(
+              icon: Icons.lightbulb_outline,
+              label: 'Explanation',
+              value: record.explanation!,
+              mono: false,
+              color: cs.primary,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (record.expectedOutput == null && record.explanation == null)
+            Text('No solution recorded for this question.',
+                style: tt.bodySmall?.copyWith(color: cs.outline)),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetSection extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool mono;
+  final Color color;
+  const _SheetSection({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.mono,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+        ]),
+        const SizedBox(height: 5),
+        mono
+            ? Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(value,
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12, height: 1.4)),
+              )
+            : Text(value,
+                style: const TextStyle(fontSize: 13, height: 1.55)),
+      ],
     );
   }
 }
@@ -275,18 +641,16 @@ class _PhaseLegend extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
+                  width: 10,
+                  height: 10,
+                  decoration:
+                      BoxDecoration(color: color, shape: BoxShape.circle)),
               const SizedBox(width: 4),
-              Text(
-                e.value,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: cs.onSurfaceVariant),
-              ),
+              Text(e.value,
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(color: cs.onSurfaceVariant)),
             ],
           );
         }).toList(),
@@ -304,65 +668,64 @@ class _DayCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs      = Theme.of(context).colorScheme;
-    final tt      = Theme.of(context).textTheme;
-    final color   = phaseColor(day.phaseNumber);
-    final locked  = status == DayStatus.locked;
-    final done    = status == DayStatus.completed;
-
-    final bgColor = locked
-        ? cs.surfaceContainerLow
-        : color.withValues(alpha: 0.10);
-
-    final borderColor = locked
-        ? cs.outlineVariant
-        : done
-            ? color
-            : color.withValues(alpha: 0.5);
+    final cs     = Theme.of(context).colorScheme;
+    final tt     = Theme.of(context).textTheme;
+    final color  = phaseColor(day.phaseNumber);
+    final locked = status == DayStatus.locked;
+    final done   = status == DayStatus.completed;
 
     return Material(
-      color: bgColor,
+      color: locked ? cs.surfaceContainerLow : color.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: locked
-            ? () => _showLockedSnack(context)
+            ? () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(
+                      'Complete Day ${day.dayNumber - 1} first.'),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 2),
+                ))
             : () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => DayDetailScreen(day: day, status: status),
+                    builder: (_) =>
+                        DayDetailScreen(day: day, status: status),
                   ),
                 ),
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor, width: 1.5),
+            border: Border.all(
+              color: locked
+                  ? cs.outlineVariant
+                  : done
+                      ? color
+                      : color.withValues(alpha: 0.5),
+              width: 1.5,
+            ),
           ),
           padding: const EdgeInsets.all(10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top row: day number + status icon
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '${day.dayNumber}',
-                    style: tt.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: locked ? cs.onSurfaceVariant : color,
-                      height: 1,
-                    ),
-                  ),
+                  Text('${day.dayNumber}',
+                      style: tt.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: locked ? cs.onSurfaceVariant : color,
+                          height: 1)),
                   if (locked)
-                    Icon(Icons.lock_outline, size: 14, color: cs.outlineVariant)
+                    Icon(Icons.lock_outline,
+                        size: 14, color: cs.outlineVariant)
                   else if (done)
                     Icon(Icons.check_circle, size: 14, color: color),
                 ],
               ),
               const Spacer(),
-              // Topic
               Text(
                 day.shortTopic,
                 style: tt.labelSmall?.copyWith(
@@ -376,7 +739,6 @@ class _DayCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 4),
-              // Phase color stripe
               ClipRRect(
                 borderRadius: BorderRadius.circular(2),
                 child: LinearProgressIndicator(
@@ -391,16 +753,6 @@ class _DayCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  void _showLockedSnack(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Complete Day ${day.dayNumber - 1} first to unlock this day.'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
       ),
     );
   }
