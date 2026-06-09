@@ -12,10 +12,19 @@ class VerificationScreen extends StatefulWidget {
   final DayContent day;
   final bool isPracticeMode;
 
+  /// When set, the test is locked to this specific question (used for retries
+  /// from the Review section).
+  final PracticeQuestion? forcedQuestion;
+
+  /// When set and the user passes, the matching struggle record is removed.
+  final String? retryForPrompt;
+
   const VerificationScreen({
     super.key,
     required this.day,
     this.isPracticeMode = false,
+    this.forcedQuestion,
+    this.retryForPrompt,
   });
 
   @override
@@ -50,6 +59,19 @@ class _VerificationScreenState extends State<VerificationScreen> {
   }
 
   void _pickQuestion() {
+    // In retry mode always use the forced question, ignoring the shuffle.
+    if (widget.forcedQuestion != null) {
+      setState(() {
+        _question     = widget.forcedQuestion;
+        _result       = null;
+        _showSolution = false;
+        _answerCtrl.clear();
+        _reasoningCtrl.clear();
+        _attemptCount++;
+      });
+      return;
+    }
+
     final pool = [
       ...widget.day.practiceQuestions.medium,
       ...widget.day.practiceQuestions.hard,
@@ -85,16 +107,27 @@ class _VerificationScreenState extends State<VerificationScreen> {
         question: _question!,
       );
 
-      // Always record the score for stats
-      ProgressScope.of(context).recordScore(widget.day.dayNumber, result.score);
+      final progress = ProgressScope.of(context);
+
+      // Always record the score for stats.
+      progress.recordScore(widget.day.dayNumber, result.score);
 
       if (result.verified) {
         if (!widget.isPracticeMode) {
-          ProgressScope.of(context).markPassed(widget.day.dayNumber);
+          progress.markPassed(widget.day.dayNumber);
         }
+
+        // If this was a retry, clear the struggle record.
+        if (widget.retryForPrompt != null) {
+          progress.removeStruggle(
+            dayNumber: widget.day.dayNumber,
+            prompt:    widget.retryForPrompt!,
+          );
+        }
+
         _confettiCtrl.play();
 
-        // Navigate to completion screen for Day 30 (first time only)
+        // Navigate to completion screen for Day 30 (first time only).
         if (!widget.isPracticeMode && widget.day.dayNumber == 30) {
           Future.delayed(const Duration(seconds: 2), () {
             if (mounted) {
@@ -107,7 +140,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
           });
         }
       } else {
-        ProgressScope.of(context).recordStruggle(
+        progress.recordStruggle(
           dayNumber: widget.day.dayNumber,
           dayTopic:  widget.day.shortTopic,
           question:  _question!,
@@ -133,12 +166,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
             backgroundColor: _accentColor,
             foregroundColor: Colors.white,
             title: Text(
-              widget.isPracticeMode
-                  ? 'Day ${widget.day.dayNumber} — Practice'
-                  : 'Day ${widget.day.dayNumber} — Reasoning Test',
+              widget.retryForPrompt != null
+                  ? 'Day ${widget.day.dayNumber} — Retry'
+                  : widget.isPracticeMode
+                      ? 'Day ${widget.day.dayNumber} — Practice'
+                      : 'Day ${widget.day.dayNumber} — Reasoning Test',
             ),
             actions: [
-              if (_question != null)
+              // Only show refresh when not in forced-question (retry) mode.
+              if (_question != null && widget.forcedQuestion == null)
                 IconButton(
                   icon: const Icon(Icons.refresh),
                   tooltip: 'Try a different question',
@@ -153,22 +189,25 @@ class _VerificationScreenState extends State<VerificationScreen> {
                   isPracticeMode: widget.isPracticeMode,
                 )
               : _TestBody(
-                  question:       _question!,
-                  result:         _result,
-                  formKey:        _formKey,
-                  answerCtrl:     _answerCtrl,
-                  reasonCtrl:     _reasoningCtrl,
-                  showSolution:   _showSolution,
-                  submitting:     _submitting,
-                  accentColor:    _accentColor,
-                  attemptCount:   _attemptCount,
-                  isPracticeMode: widget.isPracticeMode,
-                  isDay30:        widget.day.dayNumber == 30,
-                  onSubmit:       _submit,
-                  onShowSolution: () =>
+                  question:        _question!,
+                  result:          _result,
+                  formKey:         _formKey,
+                  answerCtrl:      _answerCtrl,
+                  reasonCtrl:      _reasoningCtrl,
+                  showSolution:    _showSolution,
+                  submitting:      _submitting,
+                  accentColor:     _accentColor,
+                  attemptCount:    _attemptCount,
+                  isPracticeMode:  widget.isPracticeMode,
+                  isDay30:         widget.day.dayNumber == 30,
+                  retryForPrompt:  widget.retryForPrompt,
+                  onSubmit:        _submit,
+                  onShowSolution:  () =>
                       setState(() => _showSolution = true),
-                  onTryAnother:   _pickQuestion,
-                  onDone:         () => Navigator.of(context).pop(),
+                  onTryAnother:    widget.forcedQuestion == null
+                      ? _pickQuestion
+                      : null,
+                  onDone:          () => Navigator.of(context).pop(),
                 ),
         ),
         // Confetti overlay
@@ -270,9 +309,10 @@ class _TestBody extends StatelessWidget {
   final int attemptCount;
   final bool isPracticeMode;
   final bool isDay30;
+  final String? retryForPrompt;
   final VoidCallback onSubmit;
   final VoidCallback onShowSolution;
-  final VoidCallback onTryAnother;
+  final VoidCallback? onTryAnother;
   final VoidCallback onDone;
 
   const _TestBody({
@@ -287,6 +327,7 @@ class _TestBody extends StatelessWidget {
     required this.attemptCount,
     required this.isPracticeMode,
     required this.isDay30,
+    required this.retryForPrompt,
     required this.onSubmit,
     required this.onShowSolution,
     required this.onTryAnother,
@@ -304,8 +345,13 @@ class _TestBody extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Retry mode banner
+            if (retryForPrompt != null) ...[
+              _RetryModeBanner(color: accentColor),
+              const SizedBox(height: 12),
+            ]
             // Practice mode banner
-            if (isPracticeMode) ...[
+            else if (isPracticeMode) ...[
               _PracticeModeBanner(color: accentColor),
               const SizedBox(height: 12),
             ],
@@ -382,18 +428,22 @@ class _TestBody extends StatelessWidget {
 
               if (result!.verified) ...[
                 _SuccessBanner(
-                    accentColor: accentColor,
-                    isPracticeMode: isPracticeMode),
+                  accentColor:    accentColor,
+                  isPracticeMode: isPracticeMode,
+                  isRetry:        retryForPrompt != null,
+                ),
                 const SizedBox(height: 16),
-                // Day 30 normal mode — auto-navigates to completion screen
+                // Day 30 normal mode — auto-navigates to completion screen.
                 if (!isPracticeMode && isDay30)
                   _WaitingRow(color: accentColor)
                 else
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: isPracticeMode
-                          ? accentColor
-                          : Colors.green.shade600,
+                      backgroundColor: retryForPrompt != null
+                          ? Colors.green.shade600
+                          : isPracticeMode
+                              ? accentColor
+                              : Colors.green.shade600,
                       minimumSize: const Size(double.infinity, 52),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
@@ -402,8 +452,11 @@ class _TestBody extends StatelessWidget {
                     icon: Icon(isPracticeMode
                         ? Icons.close_rounded
                         : Icons.arrow_back_rounded),
-                    label: Text(
-                        isPracticeMode ? 'Close Practice' : 'Back to Day'),
+                    label: Text(retryForPrompt != null
+                        ? 'Back to Home'
+                        : isPracticeMode
+                            ? 'Close Practice'
+                            : 'Back to Day'),
                   ),
               ] else ...[
                 if (!showSolution)
@@ -423,21 +476,66 @@ class _TestBody extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
                 const SizedBox(height: 8),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: accentColor,
-                    minimumSize: const Size(double.infinity, 52),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                if (onTryAnother != null)
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accentColor,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: onTryAnother,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Try a Different Question'),
+                  )
+                else
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accentColor,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: onSubmit,
+                    icon: const Icon(Icons.replay_rounded),
+                    label: const Text('Try Again'),
                   ),
-                  onPressed: onTryAnother,
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Try a Different Question'),
-                ),
               ],
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Retry mode banner ─────────────────────────────────────────────────────────
+
+class _RetryModeBanner extends StatelessWidget {
+  final Color color;
+  const _RetryModeBanner({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.history_edu_rounded, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Retry mode — pass this to clear it from your Review list.',
+              style: TextStyle(
+                  color: color, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -711,11 +809,33 @@ class _TermChip extends StatelessWidget {
 class _SuccessBanner extends StatelessWidget {
   final Color accentColor;
   final bool isPracticeMode;
-  const _SuccessBanner(
-      {required this.accentColor, required this.isPracticeMode});
+  final bool isRetry;
+  const _SuccessBanner({
+    required this.accentColor,
+    required this.isPracticeMode,
+    this.isRetry = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final String emoji;
+    final String title;
+    final String subtitle;
+
+    if (isRetry) {
+      emoji    = '🏆';
+      title    = 'Cleared from Review!';
+      subtitle = 'Great work — this question has been removed from your review list.';
+    } else if (isPracticeMode) {
+      emoji    = '💪';
+      title    = 'Great Recall!';
+      subtitle = 'Keep practicing to solidify the concepts.';
+    } else {
+      emoji    = '🎉';
+      title    = 'Day Complete!';
+      subtitle = 'Next day is now unlocked. Keep the momentum!';
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -731,26 +851,21 @@ class _SuccessBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            isPracticeMode ? '💪' : '🎉',
-            style: const TextStyle(fontSize: 28),
-          ),
+          Text(emoji, style: const TextStyle(fontSize: 28)),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isPracticeMode ? 'Great Recall!' : 'Day Complete!',
+                  title,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: Colors.green.shade700,
                       ),
                 ),
                 Text(
-                  isPracticeMode
-                      ? 'Keep practicing to solidify the concepts.'
-                      : 'Next day is now unlocked. Keep the momentum!',
+                  subtitle,
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall

@@ -2,11 +2,19 @@ import 'package:flutter/material.dart';
 import 'models/progress_state.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'services/notification_service.dart';
 import 'widgets/progress_scope.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final progress = await ProgressState.load();
+
+  // Initialise notifications; schedule reminder for returning users.
+  await NotificationService.instance.init();
+  if (!progress.isFirstLaunch) {
+    await NotificationService.instance.scheduleDailyReminder();
+  }
+
   runApp(Frontend30App(progress: progress));
 }
 

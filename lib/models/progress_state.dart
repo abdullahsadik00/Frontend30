@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/day_content.dart';
+import '../services/notification_service.dart';
 import 'struggle_record.dart';
 
 export 'struggle_record.dart';
@@ -206,6 +207,9 @@ class ProgressState extends ChangeNotifier {
 
     if (wasNew) notifyListeners();
 
+    // Reschedule the streak reminder so it doesn't fire again today.
+    NotificationService.instance.rescheduleForTomorrow().ignore();
+
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
       prefs.setStringList(_kPassed, _passed.map((e) => '$e').toList()),
@@ -242,6 +246,16 @@ class ProgressState extends ChangeNotifier {
         recordedAt:     DateTime.now(),
       ));
     }
+    notifyListeners();
+    await _persistStruggles();
+  }
+
+  Future<void> removeStruggle({
+    required int dayNumber,
+    required String prompt,
+  }) async {
+    _struggles.removeWhere(
+        (r) => r.dayNumber == dayNumber && r.prompt == prompt);
     notifyListeners();
     await _persistStruggles();
   }

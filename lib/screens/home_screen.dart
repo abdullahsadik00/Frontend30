@@ -8,6 +8,7 @@ import '../widgets/day_search_delegate.dart';
 import '../widgets/progress_scope.dart';
 import 'day_detail_screen.dart';
 import 'stats_screen.dart';
+import 'verification_screen.dart';
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 
@@ -485,9 +486,61 @@ class _FailBadge extends StatelessWidget {
   }
 }
 
-class _ReviewSheet extends StatelessWidget {
+// ── Review bottom sheet ───────────────────────────────────────────────────────
+
+class _ReviewSheet extends StatefulWidget {
   final StruggleRecord record;
   const _ReviewSheet({required this.record});
+
+  @override
+  State<_ReviewSheet> createState() => _ReviewSheetState();
+}
+
+class _ReviewSheetState extends State<_ReviewSheet> {
+  bool _loadingRetry = false;
+
+  Future<void> _retry() async {
+    setState(() => _loadingRetry = true);
+
+    final day =
+        await CurriculumService.instance.getDayByNumber(widget.record.dayNumber);
+
+    if (!mounted) return;
+
+    if (day == null) {
+      setState(() => _loadingRetry = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not load this day\'s content.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    // Try to find the exact question (preserves `code` field).
+    PracticeQuestion? question;
+    try {
+      question = day.practiceQuestions.all
+          .firstWhere((q) => q.prompt == widget.record.prompt);
+    } catch (_) {}
+
+    // Fall back to reconstructing from the StruggleRecord (no code).
+    question ??= PracticeQuestion(
+      prompt:         widget.record.prompt,
+      expectedOutput: widget.record.expectedOutput,
+      explanation:    widget.record.explanation,
+    );
+
+    final nav = Navigator.of(context);
+    nav.pop(); // close the sheet first
+    nav.push(MaterialPageRoute(
+      builder: (_) => VerificationScreen(
+        day:            day,
+        isPracticeMode: true,
+        forcedQuestion: question,
+        retryForPrompt: widget.record.prompt,
+      ),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -517,7 +570,7 @@ class _ReviewSheet extends StatelessWidget {
           Row(
             children: [
               Chip(
-                label: Text('Day ${record.dayNumber}'),
+                label: Text('Day ${widget.record.dayNumber}'),
                 backgroundColor: cs.errorContainer,
                 labelStyle: TextStyle(
                     color: cs.onErrorContainer,
@@ -526,9 +579,9 @@ class _ReviewSheet extends StatelessWidget {
                 padding: EdgeInsets.zero,
               ),
               const SizedBox(width: 8),
-              _FailBadge(count: record.failedAttempts),
+              _FailBadge(count: widget.record.failedAttempts),
               const Spacer(),
-              Text(record.dayTopic,
+              Text(widget.record.dayTopic,
                   style:
                       tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
             ],
@@ -538,33 +591,53 @@ class _ReviewSheet extends StatelessWidget {
               style: tt.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700, color: cs.error)),
           const SizedBox(height: 6),
-          Text(record.prompt,
+          Text(widget.record.prompt,
               style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 16),
-          if (record.expectedOutput != null) ...[
+          if (widget.record.expectedOutput != null) ...[
             _SheetSection(
               icon: Icons.output,
               label: 'Expected Output',
-              value: record.expectedOutput!,
+              value: widget.record.expectedOutput!,
               mono: true,
               color: cs.primary,
             ),
             const SizedBox(height: 12),
           ],
-          if (record.explanation != null) ...[
+          if (widget.record.explanation != null) ...[
             _SheetSection(
               icon: Icons.lightbulb_outline,
               label: 'Explanation',
-              value: record.explanation!,
+              value: widget.record.explanation!,
               mono: false,
               color: cs.primary,
             ),
             const SizedBox(height: 12),
           ],
-          if (record.expectedOutput == null && record.explanation == null)
+          if (widget.record.expectedOutput == null &&
+              widget.record.explanation == null)
             Text('No solution recorded.',
                 style: tt.bodySmall?.copyWith(color: cs.outline)),
           const SizedBox(height: 20),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48),
+              side: BorderSide(color: cs.primary),
+              foregroundColor: cs.primary,
+            ),
+            onPressed: _loadingRetry ? null : _retry,
+            icon: _loadingRetry
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: cs.primary),
+                  )
+                : const Icon(Icons.replay_rounded),
+            label:
+                Text(_loadingRetry ? 'Loading…' : 'Retry This Question'),
+          ),
+          const SizedBox(height: 8),
           FilledButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Got it'),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/notification_service.dart';
 import '../widgets/progress_scope.dart';
 import 'home_screen.dart';
 
@@ -47,6 +48,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _finish() async {
     await ProgressScope.of(context).completeOnboarding();
+    // Request notification permission then schedule the daily reminder.
+    await NotificationService.instance.requestPermission();
+    await NotificationService.instance.scheduleDailyReminder();
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),

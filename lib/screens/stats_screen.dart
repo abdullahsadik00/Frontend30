@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import '../models/day_content.dart';
 import '../models/progress_state.dart';
@@ -45,7 +46,6 @@ class _StatsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Group days by phase
     final phaseGroups = <int, List<DayContent>>{};
     for (final day in days) {
       phaseGroups.putIfAbsent(day.phaseNumber, () => []).add(day);
@@ -64,11 +64,13 @@ class _StatsBody extends StatelessWidget {
         _StreakRow(progress: progress),
         const SizedBox(height: 20),
 
-        // ── Score row ─────────────────────────────────────────────────────
+        // ── Score row + chart ─────────────────────────────────────────────
         if (progress.totalAttempts > 0) ...[
           _SectionLabel(label: 'Verification Scores'),
           const SizedBox(height: 8),
           _ScoreRow(progress: progress),
+          const SizedBox(height: 12),
+          _ScoreChart(progress: progress),
           const SizedBox(height: 20),
         ],
 
@@ -236,6 +238,211 @@ class _ScoreRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Score history chart ───────────────────────────────────────────────────────
+
+class _ScoreChart extends StatefulWidget {
+  final ProgressState progress;
+  const _ScoreChart({required this.progress});
+
+  @override
+  State<_ScoreChart> createState() => _ScoreChartState();
+}
+
+class _ScoreChartState extends State<_ScoreChart> {
+  int? _touchedIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    // Build avg-score spots for days that have at least one attempt.
+    final spots = <FlSpot>[];
+    for (int d = 1; d <= 30; d++) {
+      final scores = widget.progress.scoresFor(d);
+      if (scores.isNotEmpty) {
+        final avg = scores.reduce((a, b) => a + b) / scores.length;
+        spots.add(FlSpot(d.toDouble(), (avg * 100).roundToDouble()));
+      }
+    }
+
+    if (spots.isEmpty) return const SizedBox.shrink();
+
+    final minX = spots.first.x;
+    final maxX = spots.last.x;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 16, 16, 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 6, bottom: 10),
+            child: Row(
+              children: [
+                Icon(Icons.show_chart_rounded,
+                    size: 14, color: cs.primary),
+                const SizedBox(width: 6),
+                Text(
+                  'Score History',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface,
+                      ),
+                ),
+                const Spacer(),
+                Container(
+                  width: 20,
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text('40% pass',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: cs.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 160,
+            child: LineChart(
+              LineChartData(
+                minX: minX,
+                maxX: maxX,
+                minY: 0,
+                maxY: 100,
+                clipData: const FlClipData.all(),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 25,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: cs.outlineVariant.withValues(alpha: 0.5),
+                    strokeWidth: 1,
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: spots.length <= 5 ? 1 : 5,
+                      reservedSize: 22,
+                      getTitlesWidget: (value, meta) {
+                        if (value != value.roundToDouble()) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'D${value.toInt()}',
+                            style: TextStyle(
+                                fontSize: 9,
+                                color: cs.onSurfaceVariant),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 25,
+                      reservedSize: 34,
+                      getTitlesWidget: (value, meta) => Text(
+                        '${value.toInt()}%',
+                        style: TextStyle(
+                            fontSize: 9, color: cs.onSurfaceVariant),
+                      ),
+                    ),
+                  ),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                ),
+                lineBarsData: [
+                  // Score line
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: spots.length > 2,
+                    curveSmoothness: 0.3,
+                    color: cs.primary,
+                    barWidth: 2.5,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, barData, index) =>
+                          FlDotCirclePainter(
+                            radius: _touchedIndex == index ? 5 : 3,
+                            color: cs.primary,
+                            strokeWidth: 2,
+                            strokeColor: cs.surface,
+                          ),
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          cs.primary.withValues(alpha: 0.18),
+                          cs.primary.withValues(alpha: 0.02),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Dashed 40% threshold line
+                  LineChartBarData(
+                    spots: [FlSpot(minX, 40), FlSpot(maxX, 40)],
+                    isCurved: false,
+                    color: Colors.orange.withValues(alpha: 0.65),
+                    barWidth: 1.5,
+                    dashArray: [5, 4],
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(show: false),
+                  ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchCallback: (event, response) {
+                    final idx = response?.lineBarSpots?.first.spotIndex;
+                    if (idx != _touchedIndex) {
+                      setState(() => _touchedIndex = idx);
+                    }
+                  },
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => cs.inverseSurface,
+                    getTooltipItems: (touchedSpots) =>
+                        touchedSpots.map((spot) {
+                      if (spot.barIndex != 0) return null;
+                      return LineTooltipItem(
+                        'Day ${spot.x.toInt()}\n${spot.y.toStringAsFixed(0)}%',
+                        TextStyle(
+                          color: cs.onInverseSurface,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

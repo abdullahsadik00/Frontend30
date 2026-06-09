@@ -13,6 +13,9 @@ dependencies:
   flutter_markdown: ^0.7.3
   shared_preferences: ^2.3.2
   confetti: ^0.7.0
+  flutter_local_notifications: ^17.2.4
+  timezone: ^0.9.4
+  fl_chart: ^0.69.0
 
 dev_dependencies:
   flutter_test:
